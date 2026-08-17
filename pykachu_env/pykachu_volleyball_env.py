@@ -88,18 +88,53 @@ class PykachuEnv(gym.Env):
         }
 
     def step(self, action):
-        player1_input = UserInput(action)
-        player2_input = UserInput(action)
+        # 입력 처리
+        player1_input = UserInput()  # 왼쪽은 랜덤 or 비어 있음
+        player2_input = UserInput(action)  # 오른쪽은 학습
 
+        # 이전 위치 저장
+        prev_x = self.physics.player2.x
+        prev_y = self.physics.player2.y
+
+        # 물리 엔진 실행
         self.is_ball_touching_ground = self.physics.run_engine([player1_input, player2_input])
 
-        if self.is_ball_touching_ground:
-            if self.physics.ball.punch_effect_x < GROUND_HALF_WIDTH: #player2 wins
+        # 기본 정보 가져오기
+        ball = self.physics.ball
+        player = self.physics.player2  # 오른쪽 학습 대상
+        ball_dx = abs(player.x - ball.x)
+        ball_dy = abs(player.y - ball.y)
+
+        # --- 리워드 구성 ---
+        reward = 0
+        done = self.is_ball_touching_ground
+
+        ## 1. base reward (승패 판단)
+        if done:
+            if ball.punch_effect_x < GROUND_HALF_WIDTH:  # player2 승
                 self.is_player_2_serve = True
-            else:#player1 wins
+                reward += 15
+            else:  # player2 패
                 self.is_player_2_serve = False
- 
-        return self.observation, self.reward, self.terminated, self.info
+                reward -= 10
+
+        ## 2. move bonus (이동거리)
+        move_dist = ((player.x - prev_x) ** 2 + (player.y - prev_y) ** 2) ** 0.5
+        reward += 0.01 * move_dist
+
+        ## 3. rally bonus (생존 시간 보상)
+        reward += 0.1
+
+        ## 4. hit bonus (공과 가까운 거리 or 충돌)
+        if player.is_ball_collision_happened:
+            reward += 1.0
+        else:
+            dist = ((ball_dx) ** 2 + (ball_dy) ** 2) ** 0.5
+            if dist != 0:
+                reward += 0.1 / dist  # 가까울수록 더 큰 보상
+
+        # 반환 (observation, reward, done, info)
+        return self.observation, reward, done, self.info
 
 
     def render(self):
@@ -122,7 +157,7 @@ class PykachuEnv(gym.Env):
             self.view.draw_background()
             self.view.draw_players_and_ball(self.physics) 
             pygame.display.update()
-            self._clock.tick(25)
+            self._clock.tick(35)
 
     def reset(self, seed = None):
         super().reset(seed = seed)
