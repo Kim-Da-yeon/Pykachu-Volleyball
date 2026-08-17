@@ -3,6 +3,13 @@
 ![pikachu](./pika.gif)
 
 # Introduction
+
+> **This is a fork of [Frog-Slayer/Pykachu-Volleyball](https://github.com/Frog-Slayer/Pykachu-Volleyball).**
+> The upstream repository provides the `gymnasium` environment. This fork adds a
+> tabular **Q-learning agent** on top of it, along with a reshaped reward function
+> used to train that agent. See [Q-learning agent](#q-learning-agent) below for
+> everything that is new here.
+
 The source code on this repository is an adaption of [the code](https://github.com/gorisanson/pikachu-volleyball), which is gained by reverse engineering the original game, developed by "(C) SACHI SOFT"
 
 This is a `gymnasium` environment for single-agent reinforcement learning with a computer as an opponent. Multi-agent environment will be added later, using `pettingzoo`.
@@ -74,8 +81,12 @@ env.close()
 
 The `step()` funcion also returns `reward`, `terminated`, and `info`, along with the above `observation`. 
 
+`step()` takes **one** action, which controls **player 2 (the right-hand Pikachu)**.
+Player 1 is driven by the built-in computer AI, so you never pass an input for it.
+
 ### `reward`
-You'll get `+1` when you win, otherwise `-1`(i.e. if the opponent computer wins).
+See [Reward shaping](#reward-shaping) — this fork replaces the upstream `+1 / -1`
+win-loss reward with a dense, shaped reward.
 
 ### `terminated`
 `True` if the ball touches the ground, otherwise `False`. 
@@ -102,6 +113,76 @@ You can get additional information about the players and tha ball.
     }
 }
 ```
+
+
+# Q-learning agent
+
+This is the part added in this fork. A tabular Q-learning agent learns to play
+**player 2 (right side)** against the game's built-in computer AI on the left.
+
+| File                 | Purpose                                                        |
+|----------------------|----------------------------------------------------------------|
+| `train_qlearning.py` | Trains the agent and writes the Q-table to `q_table.pkl`        |
+| `test_qlearning.py`  | Loads `q_table.pkl` and plays 5 greedy episodes                 |
+| `q_table.pkl`        | A pre-trained Q-table, so you can run the test script directly  |
+| `sample.py`          | Upstream random-action example                                  |
+
+## State discretization
+
+The raw observation is a `(432, 304, 3)` RGB frame, which is far too large for a
+table. Instead the agent builds its state from `info`, binning positions into a
+20-pixel grid:
+
+```python
+state = (ball.x // 20, ball.y // 20, player2.x // 20, player2.y // 20)
+```
+
+The Q-table is a `dict` keyed by that 4-tuple, mapping to a `dict` over all
+18 actions (`3 x 3 x 2`). Unseen states are created lazily, so the table only
+holds states the agent has actually visited.
+
+## Reward shaping
+
+The upstream environment returns `+1` on a win and `-1` on a loss. That signal is
+too sparse for tabular Q-learning — most steps carry no information at all — so
+`PykachuEnv.step()` in this fork returns a dense reward instead:
+
+| Term          | Value                   | Intent                                            |
+|---------------|-------------------------|---------------------------------------------------|
+| Win           | `+15` (on termination)  | Main objective                                    |
+| Loss          | `-10` (on termination)  | Main objective                                    |
+| Rally bonus   | `+0.1` per step         | Reward keeping the ball alive                     |
+| Move bonus    | `+0.01 * distance`      | Discourage standing still                         |
+| Hit bonus     | `+1.0` on ball contact  | Reward actually touching the ball                 |
+| Proximity     | `+0.1 / distance`       | Dense gradient toward the ball when not touching  |
+
+Note that `step()` returns the 4-tuple `(observation, reward, terminated, info)`,
+not the gymnasium-standard 5-tuple.
+
+## Hyperparameters
+
+Defaults in `train_qlearning.py`:
+
+| Parameter       | Value   |
+|-----------------|---------|
+| `alpha`         | `0.1`   |
+| `gamma`         | `0.95`  |
+| `epsilon`       | `1.0` decaying by `0.999` per episode, floor `0.1` |
+| `episodes`      | `10000` |
+
+## Usage
+
+```bash
+pip install -e .
+pip install matplotlib     # only needed for the training plots
+
+python train_qlearning.py  # trains, saves q_table.pkl, plots reward + epsilon
+python test_qlearning.py   # replays 5 greedy episodes from q_table.pkl
+```
+
+Both scripts run with `render_mode="human"` and a `time.sleep(0.02)` per step, so
+they play back at watchable speed. Training all 10,000 episodes this way takes a
+very long time — drop the `sleep` (and the renderer) if you only want the table.
 
 
 # TODOs
