@@ -64,38 +64,24 @@ python test_qlearning.py
 
 두 스크립트 모두 `render_mode="human"` + step당 `time.sleep(0.02)`. 10,000 에피소드는 매우 오래 걸리므로 표만 필요하면 sleep과 렌더러 제거.
 
-## Limitations
+## 한계
 
-- **The state is not Markov.** It holds only positions — ball `(x, y)` and player
-  `(x, y)`, binned to 20px — and drops `ball.x_velocity` / `ball.y_velocity`, which
-  `info` does expose. The agent therefore cannot distinguish a ball travelling
-  toward it from the same ball travelling away, and those two situations need
-  opposite actions. Adding binned velocity is the single most likely improvement.
-- **No results are reported.** The training script plots reward and epsilon curves
-  but nothing is saved or summarized, and win rate against the built-in AI was
-  never measured. The shipped `q_table.pkl` has no accompanying score.
-- **Rendering during training.** As noted above, 10,000 episodes at 0.02 s per step
-  is impractical; the table shipped here was necessarily trained on far fewer.
-- **The reward's shaping terms may fight the objective.** The `+0.1` per-step rally
-  bonus rewards prolonging a rally, which is not the same as winning it, and the
-  `+0.1 / dist` proximity term grows without bound as the player approaches the
-  ball. Neither weight was tuned.
-- **`step()` returns a 4-tuple**, not gymnasium's standard
-  `(obs, reward, terminated, truncated, info)`, so standard RL libraries
-  (Stable-Baselines3 and similar) will not accept this environment as-is.
+- **상태가 Markov 아님.** 좌표만 보유하고 `info`가 제공하는 `ball.x_velocity` · `ball.y_velocity`를 버림. 다가오는 공과 멀어지는 공이 같은 상태로 취급되나 필요한 행동은 반대. 속도 이산화 추가가 가장 유효한 개선
+- **결과 미측정.** reward·epsilon 곡선만 그리고 저장·요약 없음. 내장 AI 상대 승률 미측정, `q_table.pkl`에 대응하는 점수 없음
+- **학습 중 렌더링.** step당 0.02초로 10,000 에피소드는 비현실적. 배포된 표는 그보다 적은 학습량
+- **보상 항의 상충 가능성.** step당 `+0.1` 랠리 보너스는 랠리 연장을 보상하나 승리와 다름. `+0.1 / 거리` 근접 항은 접근할수록 무한 증가. 가중치 미조정
+- **`step()`이 4-tuple 반환.** gymnasium 표준 `(obs, reward, terminated, truncated, info)`가 아니라 Stable-Baselines3 등 표준 RL 라이브러리에서 그대로 사용 불가
 
-## TODOs
-For the code may not be fully compliant with `gymnasium` standard APIs, there may be some bugs or issues. Please let me know if there is an error or if you need additional functions. Good luck.
+## Upstream TODO
 
-- [X] reset and reward 
-- [X] refactor to Python convention 
-- [X] draw background
-- [X] ~~show game start message~~
-- [X] transparent Pikachu background 
-- [X] trail, punch, hyper sprites 
-- [X] fix computer's improper movements
-- [X] ball rotation 
-- [X] draw shadows
-- [ ] support render_mode 'rgb_array'
-- [ ] specific comments 
-- [ ] add sound(and make it optional) 
+- [x] reset · reward
+- [x] Python 관례 리팩터링
+- [x] 배경 렌더링
+- [x] 피카츄 배경 투명 처리
+- [x] trail · punch · hyper 스프라이트
+- [x] 컴퓨터 이동 보정
+- [x] 공 회전
+- [x] 그림자 렌더링
+- [ ] `render_mode='rgb_array'` 지원
+- [ ] 주석 보강
+- [ ] 사운드 (선택 적용)
