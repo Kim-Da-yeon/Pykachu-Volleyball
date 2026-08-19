@@ -1,188 +1,68 @@
 # Pykachu-Volleyball
 
-**A tabular Q-learning agent for the Pikachu Volleyball `gymnasium` environment, with a dense reward reshaped for table-based learning**
-
-> Fork of [Frog-Slayer/Pykachu-Volleyball](https://github.com/Frog-Slayer/Pykachu-Volleyball) · Environment: `gymnasium`, single-agent vs the game's built-in AI · Everything new here is under [Q-learning agent](#q-learning-agent)
+Pikachu Volleyball `gymnasium` 환경에 표 기반 Q-learning 적용. 표 학습용 밀집 보상 재설계 포함.
+[Frog-Slayer/Pykachu-Volleyball](https://github.com/Frog-Slayer/Pykachu-Volleyball) 포크 — 환경은 upstream, 학습 부분이 이 포크에서 추가된 것.
 
 ---
 
 ![pikachu](./pika.gif)
 
-## Overview
+## 환경
 
-The upstream repository provides the `gymnasium` environment; this fork adds the
-learning agent and the reward function it needed.
+`gym.make('PykachuVolleyball-v0', render_mode="human", is_player_2_computer=False)`
 
-The environment is an adaption of [this code](https://github.com/gorisanson/pikachu-volleyball), obtained by reverse engineering the original game developed by "(C) SACHI SOFT". It is a `gymnasium` environment for single-agent reinforcement learning with a computer as an opponent. Multi-agent support will be added later, using `pettingzoo`.
+| | |
+|---|---|
+| Action Space | `MultiDiscrete([3, 3, 2])` — 좌우 · 상하 · 파워히트 |
+| Observation Space | `Box(0, 255, (432, 304, 3), uint8)` — 화면 RGB |
+| `step()` 인자 | player 2 (오른쪽) 행동 하나. player 1은 내장 AI |
+| `step()` 반환 | `(observation, reward, terminated, info)` — 4-tuple |
+| `terminated` | 공이 바닥에 닿으면 `True` |
+| `info` | player1 · player2 좌표와 dive_direction, ball 좌표와 속도 |
 
-## Environment API
- 
-```python
-#this is in sample.py
-import gymnasium as gym
-import pykachu_env
+| 값 | `action_space[0]` 좌우 | `action_space[1]` 상하 | `action_space[2]` 파워히트 |
+|---|---|---|---|
+| 0 | 왼쪽 | 위 | NOOP |
+| 1 | NOOP | NOOP | 파워히트 |
+| 2 | 오른쪽 | 아래 | — |
 
-env = gym.make('PykachuVolleyball-v0', 
-               render_mode= "human", 
-               is_player_2_computer=False)
-```
+## Q-learning
 
-Create your environment through `gym.make('PykachuVolleyball-v0')`. Options include `render_mode`, and `is_player_2_computer`, which determines which player the computer will control.
+| 파일 | 내용 |
+|---|---|
+| `train_qlearning.py` | 학습 후 `q_table.pkl` 저장, reward·epsilon 곡선 |
+| `test_qlearning.py` | `q_table.pkl` 로드, greedy 5 에피소드 |
+| `q_table.pkl` | 학습된 Q-table |
+| `sample.py` | upstream 랜덤 행동 예제 |
 
-|                   |                          |
-|-------------------|--------------------------|
-| Action Space      | MultiDiscrete([3, 3, 2]) |
-| Observation Space | (432, 304, 3)            |
-| Observation High  | 255                      |
-| Observation Low   | 0                        |
+- **상태** — 관측이 432×304×3 RGB라 표에 부적합. `info`의 좌표를 20px 격자로 이산화
+  ```python
+  state = (ball.x // 20, ball.y // 20, player2.x // 20, player2.y // 20)
+  ```
+  Q-table은 이 4-tuple을 키로 18개 행동(3×3×2)에 매핑. 미방문 상태는 지연 생성
+- **보상** — upstream은 승 `+1` / 패 `-1`. 표 학습에는 신호가 희소해 밀집 보상으로 교체
 
+  | 항목 | 값 | 목적 |
+  |---|---|---|
+  | 승 / 패 | `+15` / `-10` | 주 목표 |
+  | 랠리 | `+0.1`/step | 공 유지 |
+  | 이동 | `+0.01 × 거리` | 정지 억제 |
+  | 타격 | `+1.0` | 공 접촉 |
+  | 근접 | `+0.1 / 거리` | 공 방향 기울기 |
 
-### Action Space
-The action space is `MultiDiscrete([3, 3, 2])`, and each corresponds to left-right input, up-down input, and power hit input in order.
+- **하이퍼파라미터** — `alpha` 0.1 · `gamma` 0.95 · `epsilon` 1.0에서 0.999 감쇠, 하한 0.1 · 10,000 에피소드
 
-#### `action_space[0]` (left-right movement)
-| Value             | Meaning                  |
-|-------------------|--------------------------|
-| 0                 | input left movement      |
-| 1                 | NOOP                     |
-| 2                 | input right movement     |
-
-#### `action_space[1]` (up-down movement)
-| Value             | Meaning                  |
-|-------------------|--------------------------|
-| 0                 | input up movement        |
-| 1                 | NOOP                     |
-| 2                 | input down movement      |
-
-#### `action_space[2]` (power hit)
-| Value             | Meaning                  |
-|-------------------|--------------------------|
-| 0                 | NOOP                     |
-| 1                 | input power hit          |
-
-
-### Observation Space
-The observation space is `Box(low=0, high=255, shape=(432, 304, 3), dtype=np.uint8)`. It is the RGB image, displayed to a human player. 
-
-```python
-#this is in sample.py
-for episode in range(5):
-    env.reset()
-
-    while True:
-        env.render()
-        action = env.action_space.sample()
-        state, reward, terminated, info = env.step(action)
-        if terminated:
-            break
-
-env.close()
-```
-
-The `step()` funcion also returns `reward`, `terminated`, and `info`, along with the above `observation`. 
-
-`step()` takes **one** action, which controls **player 2 (the right-hand Pikachu)**.
-Player 1 is driven by the built-in computer AI, so you never pass an input for it.
-
-#### `reward`
-See [Reward shaping](#reward-shaping) — this fork replaces the upstream `+1 / -1`
-win-loss reward with a dense, shaped reward.
-
-#### `terminated`
-`True` if the ball touches the ground, otherwise `False`. 
-
-#### `info`
-You can get additional information about the players and tha ball.
-```json
-{
-    "player1": {
-        "x": player1.x,
-        "y": player1.y,
-        "dive_direction" : player1.dive_direction 
-    },
-    "player2":{
-        "x": player2.x,
-        "y": player2.y,
-        "dive_direction" : player2.dive_direction 
-    },
-    "ball": {
-        "x": ball.x,
-        "x_velocity": ball.x_velocity,
-        "y": ball.y,
-        "y_velocity": ball.y_velocity,
-    }
-}
-```
-
-
-## Q-learning agent
-
-This is the part added in this fork. A tabular Q-learning agent learns to play
-**player 2 (right side)** against the game's built-in computer AI on the left.
-
-| File                 | Purpose                                                        |
-|----------------------|----------------------------------------------------------------|
-| `train_qlearning.py` | Trains the agent and writes the Q-table to `q_table.pkl`        |
-| `test_qlearning.py`  | Loads `q_table.pkl` and plays 5 greedy episodes                 |
-| `q_table.pkl`        | A pre-trained Q-table, so you can run the test script directly  |
-| `sample.py`          | Upstream random-action example                                  |
-
-### State discretization
-
-The raw observation is a `(432, 304, 3)` RGB frame, which is far too large for a
-table. Instead the agent builds its state from `info`, binning positions into a
-20-pixel grid:
-
-```python
-state = (ball.x // 20, ball.y // 20, player2.x // 20, player2.y // 20)
-```
-
-The Q-table is a `dict` keyed by that 4-tuple, mapping to a `dict` over all
-18 actions (`3 x 3 x 2`). Unseen states are created lazily, so the table only
-holds states the agent has actually visited.
-
-### Reward shaping
-
-The upstream environment returns `+1` on a win and `-1` on a loss. That signal is
-too sparse for tabular Q-learning — most steps carry no information at all — so
-`PykachuEnv.step()` in this fork returns a dense reward instead:
-
-| Term          | Value                   | Intent                                            |
-|---------------|-------------------------|---------------------------------------------------|
-| Win           | `+15` (on termination)  | Main objective                                    |
-| Loss          | `-10` (on termination)  | Main objective                                    |
-| Rally bonus   | `+0.1` per step         | Reward keeping the ball alive                     |
-| Move bonus    | `+0.01 * distance`      | Discourage standing still                         |
-| Hit bonus     | `+1.0` on ball contact  | Reward actually touching the ball                 |
-| Proximity     | `+0.1 / distance`       | Dense gradient toward the ball when not touching  |
-
-Note that `step()` returns the 4-tuple `(observation, reward, terminated, info)`,
-not the gymnasium-standard 5-tuple.
-
-### Hyperparameters
-
-Defaults in `train_qlearning.py`:
-
-| Parameter       | Value   |
-|-----------------|---------|
-| `alpha`         | `0.1`   |
-| `gamma`         | `0.95`  |
-| `epsilon`       | `1.0` decaying by `0.999` per episode, floor `0.1` |
-| `episodes`      | `10000` |
-
-### Usage
+## 실행
 
 ```bash
 pip install -e .
-pip install matplotlib     # only needed for the training plots
+pip install matplotlib
 
-python train_qlearning.py  # trains, saves q_table.pkl, plots reward + epsilon
-python test_qlearning.py   # replays 5 greedy episodes from q_table.pkl
+python train_qlearning.py
+python test_qlearning.py
 ```
 
-Both scripts run with `render_mode="human"` and a `time.sleep(0.02)` per step, so
-they play back at watchable speed. Training all 10,000 episodes this way takes a
-very long time — drop the `sleep` (and the renderer) if you only want the table.
+두 스크립트 모두 `render_mode="human"` + step당 `time.sleep(0.02)`. 10,000 에피소드는 매우 오래 걸리므로 표만 필요하면 sleep과 렌더러 제거.
 
 ## Limitations
 
